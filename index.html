@@ -309,18 +309,59 @@ textarea { resize: vertical; min-height: 80px; font-family: 'DM Mono', monospace
 <div id="page-import" class="page">
   <div class="page-header">
     <div class="page-title">Import statement</div>
-    <div class="page-sub">Paste your credit card or bank statement — AI categorises it automatically</div>
+    <div class="page-sub">Upload a PDF or paste text — AI extracts and categorises every transaction</div>
   </div>
   <div class="card">
-    <div class="alert alert-info"><i class="ti ti-sparkles"></i> Paste any format: PDF text, email statement, or CSV rows. Claude reads it, extracts every transaction, and assigns categories.</div>
-    <div class="form-row" style="margin-top:8px">
+    <div class="alert alert-info"><i class="ti ti-sparkles"></i> Upload your PDF statement directly, or paste text from an email. Claude reads it and assigns categories automatically.</div>
+
+    <div class="form-row" style="margin-top:12px">
       <div class="field"><label>Month</label><select id="imp-month" style="width:auto"></select></div>
     </div>
-    <div class="field" style="margin-bottom:10px"><label>Statement text</label>
-      <textarea id="imp-text" rows="7" placeholder="Paste statement here...&#10;&#10;01 May 2026  CARREFOUR DUBAI       AED 234.50&#10;02 May 2026  UBER *TRIP            AED  45.00&#10;03 May 2026  DEWA UTILITY          AED 380.00"></textarea>
+
+    <!-- Tab switcher -->
+    <div style="display:flex;gap:0;margin-bottom:14px;border:0.5px solid var(--border2);border-radius:var(--radius-sm);overflow:hidden;width:fit-content">
+      <button id="tab-pdf-btn" onclick="switchImportTab('pdf')" style="padding:7px 18px;font-size:13px;cursor:pointer;border:none;background:var(--text);color:var(--surface);font-family:inherit"><i class="ti ti-file-type-pdf"></i> PDF upload</button>
+      <button id="tab-text-btn" onclick="switchImportTab('text')" style="padding:7px 18px;font-size:13px;cursor:pointer;border:none;background:none;color:var(--text2);font-family:inherit"><i class="ti ti-clipboard-text"></i> Paste text</button>
     </div>
-    <button class="btn btn-primary" onclick="parseStatement()"><i class="ti ti-sparkles"></i> Parse with AI</button>
-    <span id="imp-status" style="font-size:12px;color:var(--text3);margin-left:10px"></span>
+
+    <!-- PDF upload tab -->
+    <div id="imp-tab-pdf">
+      <div id="pdf-drop-zone" onclick="document.getElementById('pdf-file-input').click()"
+        style="border:1.5px dashed var(--border2);border-radius:var(--radius);padding:2.5rem 1rem;text-align:center;cursor:pointer;transition:background .15s;margin-bottom:12px"
+        ondragover="event.preventDefault();this.style.background='var(--surface2)'"
+        ondragleave="this.style.background=''"
+        ondrop="handlePdfDrop(event)">
+        <i class="ti ti-cloud-upload" style="font-size:32px;color:var(--text3);display:block;margin-bottom:10px"></i>
+        <div style="font-size:14px;font-weight:500;margin-bottom:4px">Drop your PDF statement here</div>
+        <div style="font-size:12px;color:var(--text3)">or click to browse files</div>
+        <input type="file" id="pdf-file-input" accept=".pdf" style="display:none" onchange="handlePdfFile(this.files[0])">
+      </div>
+      <div id="pdf-status-bar" style="display:none;align-items:center;gap:10px;padding:10px 14px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:12px;font-size:13px">
+        <i class="ti ti-file-type-pdf" style="font-size:18px;color:var(--red)"></i>
+        <span id="pdf-filename" style="flex:1;font-weight:500"></span>
+        <span id="pdf-pages" style="color:var(--text3)"></span>
+        <button class="btn btn-xs btn-danger" onclick="clearPdf()"><i class="ti ti-x"></i> Remove</button>
+      </div>
+      <div id="pdf-progress" style="display:none;margin-bottom:12px">
+        <div style="font-size:12px;color:var(--text3);margin-bottom:6px" id="pdf-progress-label">Extracting text from PDF...</div>
+        <div style="height:4px;background:var(--surface2);border-radius:2px;overflow:hidden">
+          <div id="pdf-progress-bar" style="height:100%;background:var(--text);border-radius:2px;width:0%;transition:width .3s"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Text paste tab -->
+    <div id="imp-tab-text" style="display:none">
+      <div class="field" style="margin-bottom:12px">
+        <label>Paste statement text</label>
+        <textarea id="imp-text" rows="8" placeholder="Paste your bank or credit card statement here...&#10;&#10;01 May 2026  CARREFOUR DUBAI       AED 234.50&#10;02 May 2026  UBER *TRIP            AED  45.00&#10;03 May 2026  DEWA UTILITY          AED 380.00"></textarea>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="parseStatement()"><i class="ti ti-sparkles"></i> Parse with AI</button>
+      <span id="imp-status" style="font-size:12px;color:var(--text3)"></span>
+    </div>
   </div>
   <div id="imp-preview-card" class="card" style="display:none">
     <div class="card-head">
@@ -827,31 +868,123 @@ function deleteRec(id){ S.recurring=S.recurring.filter(r=>r.id!==id); save(); re
 
 /* ── IMPORT ── */
 let pendingImport=[];
+let pdfExtractedText='';
+let currentImportTab='pdf';
+
 function renderImport(){ populateMonthSelects(); }
+
+function switchImportTab(tab){
+  currentImportTab=tab;
+  document.getElementById('imp-tab-pdf').style.display=tab==='pdf'?'block':'none';
+  document.getElementById('imp-tab-text').style.display=tab==='text'?'block':'none';
+  document.getElementById('tab-pdf-btn').style.background=tab==='pdf'?'var(--text)':'none';
+  document.getElementById('tab-pdf-btn').style.color=tab==='pdf'?'var(--surface)':'var(--text2)';
+  document.getElementById('tab-text-btn').style.background=tab==='text'?'var(--text)':'none';
+  document.getElementById('tab-text-btn').style.color=tab==='text'?'var(--surface)':'var(--text2)';
+}
+
+function handlePdfDrop(e){
+  e.preventDefault();
+  document.getElementById('pdf-drop-zone').style.background='';
+  const file=e.dataTransfer.files[0];
+  if(file&&file.type==='application/pdf') handlePdfFile(file);
+  else alert('Please drop a PDF file.');
+}
+
+async function handlePdfFile(file){
+  if(!file) return;
+  document.getElementById('pdf-status-bar').style.display='flex';
+  document.getElementById('pdf-filename').textContent=file.name;
+  document.getElementById('pdf-pages').textContent='Reading...';
+  document.getElementById('pdf-progress').style.display='block';
+  document.getElementById('pdf-progress-label').textContent='Loading PDF...';
+  document.getElementById('pdf-progress-bar').style.width='10%';
+  document.getElementById('imp-status').textContent='';
+  pdfExtractedText='';
+
+  try{
+    if(!window.pdfjsLib){
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+      pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+    const arrayBuffer=await file.arrayBuffer();
+    document.getElementById('pdf-progress-bar').style.width='30%';
+    document.getElementById('pdf-progress-label').textContent='Parsing PDF pages...';
+    const pdf=await pdfjsLib.getDocument({data:arrayBuffer}).promise;
+    const numPages=pdf.numPages;
+    document.getElementById('pdf-pages').textContent=numPages+' page'+(numPages>1?'s':'');
+    let fullText='';
+    for(let p=1;p<=numPages;p++){
+      const page=await pdf.getPage(p);
+      const content=await page.getTextContent();
+      const pageText=content.items.map(i=>i.str).join(' ');
+      fullText+=pageText+'\n';
+      const pct=30+Math.round((p/numPages)*60);
+      document.getElementById('pdf-progress-bar').style.width=pct+'%';
+      document.getElementById('pdf-progress-label').textContent=`Extracting page ${p} of ${numPages}...`;
+    }
+    pdfExtractedText=fullText.trim();
+    document.getElementById('pdf-progress-bar').style.width='100%';
+    document.getElementById('pdf-progress-label').textContent='PDF ready — click Parse with AI';
+    document.getElementById('imp-status').textContent=`✓ ${numPages} pages extracted`;
+    setTimeout(()=>document.getElementById('pdf-progress').style.display='none',1500);
+  }catch(err){
+    document.getElementById('pdf-progress').style.display='none';
+    document.getElementById('imp-status').textContent='Could not read PDF. Try the paste text option.';
+    console.error(err);
+  }
+}
+
+function clearPdf(){
+  pdfExtractedText='';
+  document.getElementById('pdf-status-bar').style.display='none';
+  document.getElementById('pdf-progress').style.display='none';
+  document.getElementById('pdf-file-input').value='';
+  document.getElementById('imp-status').textContent='';
+}
+
+function loadScript(src){
+  return new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src=src; s.onload=res; s.onerror=rej;
+    document.head.appendChild(s);
+  });
+}
+
 async function parseStatement(){
-  const text=document.getElementById('imp-text').value.trim();
-  if(!text){alert('Paste your statement first.');return;}
   const mk=document.getElementById('imp-month').value;
   const idx=MONTH_KEYS.indexOf(mk);
+  let text='';
+  if(currentImportTab==='pdf'){
+    if(!pdfExtractedText){alert('Please upload a PDF first.');return;}
+    text=pdfExtractedText;
+  } else {
+    text=document.getElementById('imp-text').value.trim();
+    if(!text){alert('Please paste your statement text first.');return;}
+  }
   const btn=document.querySelector('#page-import .btn-primary');
-  btn.textContent='Parsing...'; btn.disabled=true;
-  document.getElementById('imp-status').textContent='';
+  btn.innerHTML='<i class="ti ti-loader"></i> Parsing...'; btn.disabled=true;
+  document.getElementById('imp-status').textContent='Sending to AI...';
   const cats=S.categories.map(c=>c.id+':'+c.name).join(', ');
+  const truncated=text.length>12000?text.slice(0,12000)+'...':text;
   try{
     const resp=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:2000,
+      body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:3000,
         messages:[{role:'user',content:`Parse this credit card/bank statement and extract ALL transactions. Assign categories from: ${cats}.
-Return ONLY a JSON array, no other text:
+Return ONLY a JSON array, no markdown, no explanation:
 [{"date":"DD Mon","desc":"cleaned merchant name","cat":"category_id","amount":123.45},...]
-Statement for ${MONTHS_S[idx]} 2026:\n${text}`}]})
+Statement for ${MONTHS_S[idx]} 2026:\n${truncated}`}]})
     });
     const d=await resp.json();
-    const txt=d.content?.find(x=>x.type==='text')?.text||'[]';
-    pendingImport=JSON.parse(txt.replace(/```json|```/g,'').trim());
+    const raw=d.content?.find(x=>x.type==='text')?.text||'[]';
+    pendingImport=JSON.parse(raw.replace(/```json|```/g,'').trim());
     renderImportPreview(mk);
-    document.getElementById('imp-status').textContent=`Found ${pendingImport.length} transactions`;
-  }catch(e){ alert('Parse failed. Try again or add transactions manually.'); }
+    document.getElementById('imp-status').textContent=`✓ Found ${pendingImport.length} transactions`;
+  }catch(e){
+    document.getElementById('imp-status').textContent='Parse failed — try again.';
+    console.error(e);
+  }
   btn.innerHTML='<i class="ti ti-sparkles"></i> Parse with AI'; btn.disabled=false;
 }
 function renderImportPreview(mk){
